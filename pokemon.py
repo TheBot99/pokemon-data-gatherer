@@ -1,6 +1,13 @@
 import asyncio
 import aiopoke
 import time
+import json
+import os
+from xata.client import XataClient
+
+xata = XataClient(api_key=os.environ.get('XATA_API_KEY'), db_url=os.environ.get('XATA_DB_URL'))
+
+
 
 MOVE_LEARN_METHOD_MAP = {
     "level-up": "level-up",
@@ -81,46 +88,96 @@ class Pokemon:
                     moves_by_generation[generation]["tutor"].add(move.move.name)
         return {generation: {"level-up": list(moves["level-up"]), "TM": list(moves["TM"]), "egg": list(moves["egg"]), "tutor": list(moves["tutor"])} for generation, moves in moves_by_generation.items()}
 
-    async def get_evolution_chain(self):
+    async def get_abilities(self):
+        if not self.pokemon:
+            await self.fetch()
+        hidden_abilities = []
+        non_hidden_abilities = []
+        for ability in self.pokemon.abilities:
+            ability_name = ability.ability.name
+            is_hidden = ability.is_hidden
+            if is_hidden:
+                hidden_abilities.append(ability_name)
+            else:
+                non_hidden_abilities.append(ability_name)
+        return hidden_abilities, non_hidden_abilities
+
+    async def get_base_stats(self):
+        if not self.pokemon:
+            await self.fetch()
+        base_stats = {}
+        for stat in self.pokemon.stats:
+            base_stats[stat.stat.name] = stat.base_stat
+        return base_stats
+    
+    async def get_has_gender_differences(self):
         if not self.species:
             await self.fetch()
-        evolution_chain = await self.species.get_evolution_chain()
-        return evolution_chain
-
-    async def split_evolution_chain(self):
-        chain = await self.get_evolution_chain()
-        pre_evolution = []
-        evolution = [chain.chain.species.name]
-        while 'evolves_to' in chain.chain and chain.chain.evolves_to:
-            chain.chain = chain.chain.evolves_to[0]
-            evolution.append(chain.chain.species.name)
-        pre_evolution, evolution = evolution[:-1], evolution[-1]
-        return pre_evolution, evolution
-
+        return self.species.has_gender_differences
+    
+    async def get_varieties(self):
+        if not self.species:
+            await self.fetch()
+        varieties = []
+        for variety in self.species.varieties:
+            form_name = variety.pokemon.name
+            varieties.append(form_name)
+        return varieties
+    
+    async def get_weight(self):
+        if not self.pokemon:
+            await self.fetch()
+        return self.pokemon.weight
+    
+    async def get_height(self):
+        if not self.pokemon:
+            await self.fetch()
+        return self.pokemon.height
+        
+        
     
 
-# Use the class
-async def main():
-    p = Pokemon(1)  # Replace 1 with the ID of the Pokemon you want to fetch
-    print(await p.get_name())
-    print(await p.get_typings())
-    generations = await p.get_generations()
+
+
+async def main(pokemon_id):
+    p = Pokemon(pokemon_id)
     moves_by_generation = await p.get_moves()
-    moves_by_generation_print = {}
+
+    # Convert the moves dictionary to a JSON string
+    moves_json = json.dumps(moves_by_generation, indent=3)
+    generations = await p.get_generations()
+    generations_list = []
     for generation in generations:
-        moves_by_generation_print[VERSION_NAME_TO_GENERATION[generation]] = moves_by_generation.get(VERSION_NAME_TO_GENERATION[generation], [])
-    #print(moves_by_generation_print)
-    print(moves_by_generation.get('generation-VIII', {}))
-    for generation, moves in moves_by_generation.items():
-        print(f"Generation: {generation}")
-        print(f"Total number of moves: {len(moves)}")
-        print(f"Level-up moves: {len(moves['level-up'])}")
-        print(f"TM moves: {len(moves['TM'])}")
-        print(f"Egg moves: {len(moves['egg'])}")
-        print(f"Tutor moves: {len(moves['tutor'])}")
-        print()
+        generations_list.append(VERSION_NAME_TO_GENERATION.get(generation, 'unknown'))
+        generations_list = list(set(generations_list))
+    
+    varieties = await p.get_varieties()
+    varieties.pop(await p.get_name())
+
+
+    # data = xata.records().insert("pokemon", {
+    #     "name": await p.get_name(),
+    #     "types": await p.get_typings(),
+    #     "hp": (await p.get_base_stats())['hp'],
+    #     "attack": (await p.get_base_stats())['attack'],
+    #     "defense": (await p.get_base_stats())['defense'],
+    #     "special-attack": (await p.get_base_stats())['special-attack'],
+    #     "special-defense": (await p.get_base_stats())['special-defense'],
+    #     "speed": (await p.get_base_stats())['speed'],
+    #     "hidden-ability": str((await p.get_abilities())[0]),
+    #     "abilities": (await p.get_abilities())[1],
+    #     "nat-dex-number": p.id,
+    #     "moves": moves_json,
+    #     "generations": generations_list,
+    #     "has_gender_differences": await p.get_has_gender_differences(),
+    #     "varieties": varieties,
+    #     "weight": await p.get_weight(),
+    #     "height": await p.get_height()
+    # })
+    # print(data)
     
 
 start_time = time.time()
-asyncio.run(main())
+for i in range(1, 152): # 1 to 1
+    asyncio.run(main(i))
 print(f"--- {time.time() - start_time} seconds ---")
