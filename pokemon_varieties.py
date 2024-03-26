@@ -9,7 +9,6 @@ xata = XataClient(
     api_key=os.environ.get("XATA_API_KEY"), db_url=os.environ.get("XATA_DB_URL")
 )
 
-
 MOVE_LEARN_METHOD_MAP = {
     "level-up": "level-up",
     "machine": "TM",
@@ -52,7 +51,7 @@ class Pokemon:
     async def fetch(self):
         client = aiopoke.AiopokeClient()
         self.pokemon = await client.get_pokemon(self.id)
-        self.species = await client.get_pokemon_species(self.id)
+        
 
     async def get_name(self):
         if not self.pokemon:
@@ -133,20 +132,6 @@ class Pokemon:
             base_stats[stat.stat.name] = stat.base_stat
         return base_stats
 
-    async def get_has_gender_differences(self):
-        if not self.species:
-            await self.fetch()
-        return self.species.has_gender_differences
-
-    async def get_varieties(self):
-        if not self.species:
-            await self.fetch()
-        varieties = []
-        for variety in self.species.varieties:
-            form_name = variety.pokemon.name
-            varieties.append(form_name)
-        return varieties
-
     async def get_weight(self):
         if not self.pokemon:
             await self.fetch()
@@ -178,32 +163,49 @@ class Pokemon:
         return self.pokemon.sprites.front_shiny.url
 
 
-async def main(pokemon_id):
-    p = Pokemon(pokemon_id)
-    moves_by_generation = await p.get_moves()
+async def main():
+    records = xata.data().query("pokemon", {
+  "page": {
+    "size": 1000 # limit result set to 25 records
+  }
+})
+    #print(records)
+    records = records["records"]
+    for record in records:
+        if record["varieties"] != []:
+            print(record["name"], record["varieties"])
+            for variety in record["varieties"]:
+                p = Pokemon(variety)
+                await p.fetch()
 
-    # Convert the moves dictionary to a JSON string
-    moves_json = json.dumps(moves_by_generation, indent=3)
-    generations = await p.get_generations()
-    generations_list = []
-    for generation in generations:
-        generations_list.append(VERSION_NAME_TO_GENERATION.get(generation, "unknown"))
-        generations_list = list(set(generations_list))
+                print(await p.get_name())
 
-    varieties = await p.get_varieties()
-    varieties.pop(0)
-    has_gender_differences = await p.get_has_gender_differences()
-    if has_gender_differences:
-        front_female_sprite_default = await p.get_front_female_sprite_default()
-        front_female_sprite_shiny = await p.get_front_female_sprite_shiny()
-    else:
-        front_female_sprite_default = None
-        front_female_sprite_shiny = None
+                moves_by_generation = await p.get_moves()
 
-    data = xata.records().insert(
-        "pokemon",
-        {
-            "name": await p.get_name(),
+                # Convert the moves dictionary to a JSON string
+                moves_json = json.dumps(moves_by_generation, indent=3)
+                generations = await p.get_generations()
+                generations_list = []
+                for generation in generations:
+                    generations_list.append(VERSION_NAME_TO_GENERATION.get(generation, "unknown"))
+                    generations_list = list(set(generations_list))
+
+                
+                front_female_sprite_default = None
+                front_female_sprite_shiny = None
+
+                try:
+                    front_sprite_default = await p.get_front_sprite_default()
+                except:
+                    front_sprite_default = None
+
+                try:
+                    front_sprite_shiny = await p.get_front_sprite_shiny()
+                except:
+                    front_sprite_shiny = None
+
+                data = xata.records().insert("varieties", {
+                    "name": await p.get_name(),
             "types": await p.get_typings(),
             "hp": (await p.get_base_stats())["hp"],
             "attack": (await p.get_base_stats())["attack"],
@@ -213,23 +215,18 @@ async def main(pokemon_id):
             "speed": (await p.get_base_stats())["speed"],
             "hidden-ability": (await p.get_abilities())[0],
             "abilities": (await p.get_abilities())[1],
-            "nat-dex-number": p.id,
             "moves": moves_json,
             "generations": generations_list,
-            "has_gender_differences": await p.get_has_gender_differences(),
-            "varieties": varieties,
+            "default-pokemon": record["name"],
             "weight": await p.get_weight(),
             "height": await p.get_height(),
-            "front_sprite_default": await p.get_front_sprite_default(),
-            "front_sprite_shiny": await p.get_front_sprite_shiny(),
+            "front_sprite_default": front_sprite_default,
+            "front_sprite_shiny": front_sprite_shiny,
             "front_female_sprite_default": front_female_sprite_default,
-            "front_female_sprite_shiny": front_female_sprite_shiny,
-        },
-    )
-    print(data)
-
-
-start_time = time.time()
-for i in range(902, 903):  # 10 to 1025
-    asyncio.run(main(i))
-print(f"--- {time.time() - start_time} seconds ---")
+            "front_female_sprite_shiny": front_female_sprite_shiny
+                })
+                print(data)
+                
+                
+        
+asyncio.run(main())
